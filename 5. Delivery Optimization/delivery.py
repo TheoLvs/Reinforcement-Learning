@@ -1,4 +1,4 @@
-# Base Data Science snippet
+# # Base Data Science snippet
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,8 +9,12 @@ from scipy.spatial.distance import cdist
 import imageio
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
+import time
 
-plt.style.use("seaborn-dark")
+# plt.style.use("seaborn-dark")
+plt.style.use("classic")
+
+
 
 import sys
 sys.path.append("../")
@@ -34,7 +38,7 @@ class DeliveryEnvironment(object):
         self.method = method
 
         # Generate stops
-        self._generate_constraints(**kwargs)
+        # self._generate_constraints(**kwargs)
         self._generate_stops()
         self._generate_q_values()
         self.render()
@@ -43,18 +47,18 @@ class DeliveryEnvironment(object):
         self.reset()
 
 
-    def _generate_constraints(self,box_size = 0.2,traffic_intensity = 5):
+    # def _generate_constraints(self,box_size = 0.2,traffic_intensity = 5):
 
-        if self.method == "traffic_box":
+    #     if self.method == "traffic_box":
 
-            x_left = np.random.rand() * (self.max_box) * (1-box_size)
-            y_bottom = np.random.rand() * (self.max_box) * (1-box_size)
+    #         x_left = np.random.rand() * (self.max_box) * (1-box_size)
+    #         y_bottom = np.random.rand() * (self.max_box) * (1-box_size)
 
-            x_right = x_left + np.random.rand() * box_size * self.max_box
-            y_top = y_bottom + np.random.rand() * box_size * self.max_box
+    #         x_right = x_left + np.random.rand() * box_size * self.max_box
+    #         y_top = y_bottom + np.random.rand() * box_size * self.max_box
 
-            self.box = (x_left,x_right,y_bottom,y_top)
-            self.traffic_intensity = traffic_intensity 
+    #         self.box = (x_left,x_right,y_bottom,y_top)
+    #         self.traffic_intensity = traffic_intensity 
 
 
 
@@ -128,15 +132,18 @@ class DeliveryEnvironment(object):
         plt.xticks([])
         plt.yticks([])
         
+        # Jika diminta untuk mengembalikan sebagai gambar (untuk membuat GIF)
         if return_img:
-            # From https://ndres.me/post/matplotlib-animated-gifs-easily/
-            fig.canvas.draw_idle()
-            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
-            image  = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            plt.close()
+            fig.canvas.draw()
+            # Konversi kanvas plot menjadi array numpy (gambar)
+            image = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+            image = image.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+            plt.close(fig) # Tutup plot agar tidak ditampilkan langsung
             return image
         else:
+            # Jika tidak, tampilkan plotnya langsung
             plt.show()
+
 
 
 
@@ -200,6 +207,21 @@ class DeliveryEnvironment(object):
                 additional_reward = np.random.rand()
 
             return base_reward + additional_reward
+    
+    def total_distance(self):
+        """
+        Hitung total jarak dan tampilkan urutan rute pada self.stops
+        """
+        total = 0
+        route = self.stops
+        for i in range(len(route) - 1):
+            total += self.q_stops[route[i], route[i+1]]
+        
+        print("🛣️  Rute yang diambil:", " → ".join(map(str, route)))
+        print(f"📏 Total jarak: {total:.4f}")
+        return total
+
+
 
 
     @staticmethod
@@ -223,10 +245,10 @@ class DeliveryEnvironment(object):
                 raise Exception("Provide x or y")
 
 
-    def _is_in_box(self,x,y,box):
-        # Get box coordinates
-        x_left,x_right,y_bottom,y_top = box
-        return x >= x_left and x <= x_right and y >= y_bottom and y <= y_top
+    # def _is_in_box(self,x,y,box):
+    #     # Get box coordinates
+    #     x_left,x_right,y_bottom,y_top = box
+    #     return x >= x_left and x <= x_right and y >= y_bottom and y <= y_top
 
 
     def _calculate_box_intersection(self,x1,x2,y1,y2,box):
@@ -265,45 +287,53 @@ class DeliveryEnvironment(object):
 
 
 
-def run_episode(env,agent,verbose = 1):
-
+def run_episode(env, agent, verbose=0):
+    """
+    Jalankan satu episode RL, catat reward, total jarak, dan rute.
+    """
     s = env.reset()
     agent.reset_memory()
-
-    max_step = env.n_stops
-    
     episode_reward = 0
-    
     i = 0
-    while i < max_step:
 
-        # Remember the states
+    while i < env.n_stops:
+        # Ingat state saat ini
         agent.remember_state(s)
 
-        # Choose an action
+        # Pilih aksi
         a = agent.act(s)
-        
-        # Take the action, and get the reward from environment
-        s_next,r,done = env.step(a)
 
-        # Tweak the reward
+        # Jalankan aksi
+        s_next, r, done = env.step(a)
+
+        # Reward dimodifikasi (negatif karena jarak = biaya)
         r = -1 * r
-        
-        if verbose: print(s_next,r,done)
-        
-        # Update our knowledge in the Q-table
-        agent.train(s,a,r,s_next)
-        
-        # Update the caches
+
+        # Update Q-table
+        agent.train(s, a, r, s_next)
+
+        # Akumulasi reward
         episode_reward += r
         s = s_next
-        
-        # If the episode is terminated
+
         i += 1
         if done:
             break
-            
-    return env,agent,episode_reward
+
+    # Hitung total jarak dan rute dari episode ini
+    route = [int(s) for s in env.stops]  # pastikan semua int biasa
+
+    total_distance = 0
+    for j in range(len(route)-1):
+        total_distance += env.q_stops[route[j], route[j+1]]
+
+    if verbose:
+        print(" Rute episode:", " → ".join(map(str, route)))
+        print(f" Total jarak episode: {total_distance:.4f}")
+        print(f" Total reward episode: {episode_reward:.4f}")
+
+    return env, agent, episode_reward, total_distance, route
+
 
 
 
@@ -340,30 +370,80 @@ class DeliveryQAgent(QAgent):
 
 
 
-def run_n_episodes(env,agent,name="training.gif",n_episodes=1000,render_each=10,fps=10):
-
-    # Store the rewards
+def run_n_episodes(env, agent, name="training.gif", n_episodes=1000, render_each=10, fps=10, debug_episodes=None):
+    """
+    Jalankan n_episodes RL.
+    
+    debug_episodes: list[int] -> episode yang ingin ditampilkan detailnya
+    """
     rewards = []
+    distances = []
+    routes = []
     imgs = []
 
-    # Experience replay
-    for i in tqdm_notebook(range(n_episodes)):
+    start_time = time.time()
 
-        # Run the episode
-        env,agent,episode_reward = run_episode(env,agent,verbose = 0)
+    if debug_episodes is None:
+        debug_episodes = []
+
+    for i in range(n_episodes):
+        # Jalankan satu episode
+        s = env.reset()
+        agent.reset_memory()
+        episode_reward = 0
+        route = []
+
+        for step in range(env.n_stops):
+            agent.remember_state(s)
+            a = agent.act(s)
+            s_next, r, done = env.step(a)
+            r = -1 * r
+            agent.train(s, a, r, s_next)
+            episode_reward += r
+            s = s_next
+            route.append(int(s))
+            if done:
+                break
+
+        # Hitung total jarak
+        total_distance = 0
+        prev = route[0]
+        for j in route[1:]:
+            total_distance += env.q_stops[prev, j]
+            prev = j
+
         rewards.append(episode_reward)
-        
-        if i % render_each == 0:
-            img = env.render(return_img = True)
-            imgs.append(img)
+        distances.append(total_distance)
+        routes.append(route)
 
-    # Show rewards
-    plt.figure(figsize = (15,3))
+        # Simpan gambar untuk GIF
+        if i % render_each == 0:
+            imgs.append(env.render(return_img=True))
+
+        if i in debug_episodes:
+            print(f"\n--- DEBUG Episode {i} ---")
+            print(" Rute:", " → ".join(map(str, [0]+route)))  # mulai dari start
+            print(f" Total jarak: {total_distance:.4f}")
+            print(f" Total reward: {episode_reward:.4f}")
+
+
+    total_time_rl = time.time() - start_time
+
+    # Plot reward
+    plt.figure(figsize=(15,3))
     plt.title("Rewards over training")
     plt.plot(rewards)
     plt.show()
 
-    # Save imgs as gif
-    imageio.mimsave(name,imgs,fps = fps)
+    # Simpan GIF
+    imageio.mimsave(name, imgs, fps=fps)
 
-    return env,agent
+    return env, agent, rewards, distances, routes, total_time_rl
+
+
+
+
+
+
+
+
